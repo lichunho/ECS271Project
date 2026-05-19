@@ -1,0 +1,6 @@
+# Install torch separately first via the cu128 wheel index (see README):
+#   pip install torch --index-url https://download.pytorch.org/whl/cu128
+transformers>=4.46
+accelerate>=1.0
+numpy
+pytest
