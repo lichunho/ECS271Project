@@ -48,11 +48,35 @@ This first slice stands up the classifier piece only: download a RoBERTa-large c
 
 To change where weights are cached, copy `.env.example` to `.env` and set `HF_HOME`, or set the env var directly.
 
+## LLM (Ollama)
+
+The answering LLM is served by [Ollama](https://ollama.com/) via its OpenAI-compatible local server (`http://localhost:11434/v1`). Ollama is used (rather than LM Studio) because as of LM Studio 0.3.x the OpenAI-compat layer returns `null` for per-token logprobs — which the Step 5 confidence probe depends on.
+
+1. Install Ollama from [ollama.com/download](https://ollama.com/download). The installer registers a background service; no further start step is needed.
+2. Pull a model:
+   ```powershell
+   ollama pull gemma4:latest   # ~9 GB; or any chat model you prefer
+   ```
+3. Point `LLM_MODEL` at whatever you pulled (defaults to `gemma4:latest`):
+   ```powershell
+   $env:LLM_MODEL = "gemma4:latest"
+   ```
+4. Smoke-test the connection:
+   ```powershell
+   python -m scripts.llm_smoke
+   ```
+   You should see a short probe response with a numeric mean logprob, followed by a fuller answer.
+
+The probe and full-answer modes share an identical system prompt and message structure — only `max_tokens` and the `logprobs` flag differ — so the probe's confidence genuinely reflects the answerer's knowledge.
+
+To point the client at a different OpenAI-compatible server (e.g. LM Studio on `:1234`), set `LLM_BASE_URL` and `LLM_API_KEY` in `.env`.
+
 ## Roadmap
 
 - [x] Local RoBERTa classifier loads + runs inference on GPU
 - [ ] Training data: synthesize A/B/C labels from SQuAD / HotpotQA / MuSiQue
 - [ ] Fine-tune the classifier
 - [ ] Retriever (BM25 + dense)
-- [ ] LLM integration and routing
+- [x] LLM client (probe + answer via Ollama)
+- [ ] Confidence-gated routing
 - [ ] End-to-end eval harness

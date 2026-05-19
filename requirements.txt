@@ -3,4 +3,5 @@
 transformers>=4.46
 accelerate>=1.0
 numpy
+openai>=1.50
 pytest
