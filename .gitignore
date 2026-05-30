@@ -216,3 +216,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Project datasets (downloaded + derived, never committed)
+/data/
+.tmp_adaptive_rag/
+CLAUDE.md
+
+# Claude Code local state (settings, locks, scheduled tasks)
+.claude/
