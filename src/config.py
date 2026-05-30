@@ -22,8 +22,4 @@ CACHE_DIR = os.environ.get("HF_HOME")
 
 LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://localhost:11434/v1")
 LLM_API_KEY = os.environ.get("LLM_API_KEY", "ollama")
-LLM_MODEL = os.environ.get("LLM_MODEL", "gemma4:latest")
-
-PROBE_MAX_TOKENS = 32
-ANSWER_MAX_TOKENS = 512
-LLM_TEMPERATURE = 0.0
+LLM_MODEL = os.environ.get("LLM_MODEL", "gemma4:26b")

@@ -50,26 +50,26 @@ To change where weights are cached, copy `.env.example` to `.env` and set `HF_HO
 
 ## LLM (Ollama)
 
-The answering LLM is served by [Ollama](https://ollama.com/) via its OpenAI-compatible local server (`http://localhost:11434/v1`). Ollama is used (rather than LM Studio) because as of LM Studio 0.3.x the OpenAI-compat layer returns `null` for per-token logprobs — which the Step 5 confidence probe depends on.
+The answering LLM is served by [Ollama](https://ollama.com/), reached at the `LLM_BASE_URL` you set in `.env` (see `.env.example`) — which may point at a remote host. Ollama is used (rather than LM Studio) because as of LM Studio 0.3.x the OpenAI-compat layer returns `null` for per-token logprobs — which the Step 5 confidence probe depends on.
 
 1. Install Ollama from [ollama.com/download](https://ollama.com/download). The installer registers a background service; no further start step is needed.
 2. Pull a model:
    ```powershell
-   ollama pull gemma4:latest   # ~9 GB; or any chat model you prefer
+   ollama pull gemma4:26b   # ~16 GB; or any chat model you prefer
    ```
-3. Point `LLM_MODEL` at whatever you pulled (defaults to `gemma4:latest`):
+3. Point `LLM_MODEL` at whatever you pulled (defaults to `gemma4:26b`):
    ```powershell
-   $env:LLM_MODEL = "gemma4:latest"
+   $env:LLM_MODEL = "gemma4:26b"
    ```
-4. Smoke-test the connection:
+4. Verify the model is available:
    ```powershell
-   python -m scripts.llm_smoke
+   ollama list
    ```
-   You should see a short probe response with a numeric mean logprob, followed by a fuller answer.
+   `LLM_MODEL` should appear in the list (run this on whichever host serves Ollama).
 
-The probe and full-answer modes share an identical system prompt and message structure — only `max_tokens` and the `logprobs` flag differ — so the probe's confidence genuinely reflects the answerer's knowledge.
+The LLM client ([src/annotate_lib/llm_adapter.py](src/annotate_lib/llm_adapter.py)) talks Ollama's native `/api/chat` endpoint with a single bare user-role message (no system prompt) and `think: false`, so the completion-style Adaptive-RAG few-shot prompts are continued literally.
 
-To point the client at a different OpenAI-compatible server (e.g. LM Studio on `:1234`), set `LLM_BASE_URL` and `LLM_API_KEY` in `.env`.
+`LLM_BASE_URL` / `LLM_MODEL` are set in `.env` (see `.env.example`). The client assumes an Ollama backend; pointing it at a non-Ollama server would require a new branch in `llm_adapter.py`.
 
 ## Roadmap
 
@@ -77,6 +77,6 @@ To point the client at a different OpenAI-compatible server (e.g. LM Studio on `
 - [ ] Training data: synthesize A/B/C labels from SQuAD / HotpotQA / MuSiQue
 - [ ] Fine-tune the classifier
 - [ ] Retriever (BM25 + dense)
-- [x] LLM client (probe + answer via Ollama)
+- [x] LLM client (Ollama native `/api/chat`)
 - [ ] Confidence-gated routing
 - [ ] End-to-end eval harness
