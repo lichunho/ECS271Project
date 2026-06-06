@@ -1,0 +1,278 @@
+{
+  "cache_hit_rate": 0.6666666666666666,
+  "cache_hits": 12000,
+  "cache_misses": 6000,
+  "prompt_set_id": "flan_t5_v1",
+  "leakage_drops": {
+    "eval/hotpotqa": 0,
+    "eval/2wikimultihopqa": 0,
+    "eval/musique": 0,
+    "eval/nq": 0,
+    "eval/trivia": 0,
+    "eval/squad": 0,
+    "train/hotpotqa": 0,
+    "train/2wikimultihopqa": 0,
+    "train/musique": 0,
+    "train/nq": 0,
+    "train/trivia": 0,
+    "train/squad": 0
+  },
+  "per_split": {
+    "eval": {
+      "hotpotqa": {
+        "n": 500,
+        "oracle_label_hist": {
+          "multi_step": 345,
+          "no_retrieval": 109,
+          "single_step": 46
+        },
+        "label_source_hist": {
+          "binary_fallback": 286,
+          "silver": 214
+        },
+        "strategy_pass_rates": {
+          "no_retrieval": 0.218,
+          "single_step": 0.172,
+          "multi_step": 0.306
+        },
+        "n_no_retrieval_ok": 109,
+        "frac_no_retrieval_subset_single_step": 0.3669724770642202,
+        "n_single_step_ok": 86,
+        "frac_single_step_subset_multi_step": 0.7558139534883721
+      },
+      "2wikimultihopqa": {
+        "n": 500,
+        "oracle_label_hist": {
+          "multi_step": 344,
+          "no_retrieval": 104,
+          "single_step": 52
+        },
+        "label_source_hist": {
+          "binary_fallback": 312,
+          "silver": 188
+        },
+        "strategy_pass_rates": {
+          "no_retrieval": 0.208,
+          "single_step": 0.188,
+          "multi_step": 0.248
+        },
+        "n_no_retrieval_ok": 104,
+        "frac_no_retrieval_subset_single_step": 0.40384615384615385,
+        "n_single_step_ok": 94,
+        "frac_single_step_subset_multi_step": 0.7978723404255319
+      },
+      "musique": {
+        "n": 500,
+        "oracle_label_hist": {
+          "multi_step": 449,
+          "single_step": 20,
+          "no_retrieval": 31
+        },
+        "label_source_hist": {
+          "binary_fallback": 420,
+          "silver": 80
+        },
+        "strategy_pass_rates": {
+          "no_retrieval": 0.062,
+          "single_step": 0.058,
+          "multi_step": 0.104
+        },
+        "n_no_retrieval_ok": 31,
+        "frac_no_retrieval_subset_single_step": 0.2903225806451613,
+        "n_single_step_ok": 29,
+        "frac_single_step_subset_multi_step": 0.6551724137931034
+      },
+      "nq": {
+        "n": 500,
+        "oracle_label_hist": {
+          "single_step": 336,
+          "no_retrieval": 140,
+          "multi_step": 24
+        },
+        "label_source_hist": {
+          "silver": 233,
+          "binary_fallback": 267
+        },
+        "strategy_pass_rates": {
+          "no_retrieval": 0.28,
+          "single_step": 0.272,
+          "multi_step": 0.242
+        },
+        "n_no_retrieval_ok": 140,
+        "frac_no_retrieval_subset_single_step": 0.4785714285714286,
+        "n_single_step_ok": 136,
+        "frac_single_step_subset_multi_step": 0.6323529411764706
+      },
+      "trivia": {
+        "n": 500,
+        "oracle_label_hist": {
+          "no_retrieval": 268,
+          "multi_step": 14,
+          "single_step": 218
+        },
+        "label_source_hist": {
+          "silver": 348,
+          "binary_fallback": 152
+        },
+        "strategy_pass_rates": {
+          "no_retrieval": 0.536,
+          "single_step": 0.464,
+          "multi_step": 0.388
+        },
+        "n_no_retrieval_ok": 268,
+        "frac_no_retrieval_subset_single_step": 0.6194029850746269,
+        "n_single_step_ok": 232,
+        "frac_single_step_subset_multi_step": 0.6508620689655172
+      },
+      "squad": {
+        "n": 500,
+        "oracle_label_hist": {
+          "single_step": 418,
+          "no_retrieval": 64,
+          "multi_step": 18
+        },
+        "label_source_hist": {
+          "binary_fallback": 313,
+          "silver": 187
+        },
+        "strategy_pass_rates": {
+          "no_retrieval": 0.128,
+          "single_step": 0.28,
+          "multi_step": 0.206
+        },
+        "n_no_retrieval_ok": 64,
+        "frac_no_retrieval_subset_single_step": 0.546875,
+        "n_single_step_ok": 140,
+        "frac_single_step_subset_multi_step": 0.5714285714285714
+      }
+    },
+    "train": {
+      "hotpotqa": {
+        "n": 500,
+        "oracle_label_hist": {
+          "multi_step": 350,
+          "no_retrieval": 99,
+          "single_step": 51
+        },
+        "label_source_hist": {
+          "binary_fallback": 293,
+          "silver": 207
+        },
+        "strategy_pass_rates": {
+          "no_retrieval": 0.198,
+          "single_step": 0.174,
+          "multi_step": 0.316
+        },
+        "n_no_retrieval_ok": 99,
+        "frac_no_retrieval_subset_single_step": 0.36363636363636365,
+        "n_single_step_ok": 87,
+        "frac_single_step_subset_multi_step": 0.7931034482758621
+      },
+      "2wikimultihopqa": {
+        "n": 500,
+        "oracle_label_hist": {
+          "multi_step": 341,
+          "single_step": 39,
+          "no_retrieval": 120
+        },
+        "label_source_hist": {
+          "binary_fallback": 310,
+          "silver": 190
+        },
+        "strategy_pass_rates": {
+          "no_retrieval": 0.24,
+          "single_step": 0.19,
+          "multi_step": 0.25
+        },
+        "n_no_retrieval_ok": 120,
+        "frac_no_retrieval_subset_single_step": 0.4666666666666667,
+        "n_single_step_ok": 95,
+        "frac_single_step_subset_multi_step": 0.8210526315789474
+      },
+      "musique": {
+        "n": 500,
+        "oracle_label_hist": {
+          "multi_step": 453,
+          "no_retrieval": 25,
+          "single_step": 22
+        },
+        "label_source_hist": {
+          "binary_fallback": 424,
+          "silver": 76
+        },
+        "strategy_pass_rates": {
+          "no_retrieval": 0.05,
+          "single_step": 0.062,
+          "multi_step": 0.098
+        },
+        "n_no_retrieval_ok": 25,
+        "frac_no_retrieval_subset_single_step": 0.36,
+        "n_single_step_ok": 31,
+        "frac_single_step_subset_multi_step": 0.5161290322580645
+      },
+      "nq": {
+        "n": 500,
+        "oracle_label_hist": {
+          "single_step": 363,
+          "no_retrieval": 115,
+          "multi_step": 22
+        },
+        "label_source_hist": {
+          "binary_fallback": 292,
+          "silver": 208
+        },
+        "strategy_pass_rates": {
+          "no_retrieval": 0.23,
+          "single_step": 0.262,
+          "multi_step": 0.212
+        },
+        "n_no_retrieval_ok": 115,
+        "frac_no_retrieval_subset_single_step": 0.5217391304347826,
+        "n_single_step_ok": 131,
+        "frac_single_step_subset_multi_step": 0.5725190839694656
+      },
+      "trivia": {
+        "n": 500,
+        "oracle_label_hist": {
+          "no_retrieval": 307,
+          "single_step": 182,
+          "multi_step": 11
+        },
+        "label_source_hist": {
+          "silver": 375,
+          "binary_fallback": 125
+        },
+        "strategy_pass_rates": {
+          "no_retrieval": 0.614,
+          "single_step": 0.512,
+          "multi_step": 0.418
+        },
+        "n_no_retrieval_ok": 307,
+        "frac_no_retrieval_subset_single_step": 0.6482084690553745,
+        "n_single_step_ok": 256,
+        "frac_single_step_subset_multi_step": 0.65234375
+      },
+      "squad": {
+        "n": 500,
+        "oracle_label_hist": {
+          "single_step": 407,
+          "no_retrieval": 70,
+          "multi_step": 23
+        },
+        "label_source_hist": {
+          "binary_fallback": 295,
+          "silver": 205
+        },
+        "strategy_pass_rates": {
+          "no_retrieval": 0.14,
+          "single_step": 0.296,
+          "multi_step": 0.242
+        },
+        "n_no_retrieval_ok": 70,
+        "frac_no_retrieval_subset_single_step": 0.5142857142857142,
+        "n_single_step_ok": 148,
+        "frac_single_step_subset_multi_step": 0.6148648648648649
+      }
+    }
+  }
+}

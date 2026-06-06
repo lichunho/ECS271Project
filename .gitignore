@@ -217,8 +217,12 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# Project datasets (downloaded + derived, never committed)
-/data/
+# Project datasets. Bulk corpora are downloaded/derived and huge (single files >100MB) — never committed.
+# The small, not-cheaply-reproducible artifacts ARE committed: subsampled splits + labelled output.
+/data/*
+!/data/eval_500/
+!/data/train_500/
+!/data/labeled/
 .tmp_adaptive_rag/
 CLAUDE.md
 
