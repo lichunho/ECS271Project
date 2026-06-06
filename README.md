@@ -6,7 +6,9 @@ Adaptive RAG pipeline (in the style of Jeong et al. 2024, *"Adaptive-RAG"*). A s
 - **B** — single-step retrieval (one-hop)
 - **C** — multi-step retrieval (multi-hop)
 
-This first slice stands up the classifier piece only: download a RoBERTa-large checkpoint and run inference locally on GPU. The classification head is randomly initialized — outputs are not meaningful until fine-tuning lands in a later step.
+This project uses RoBERTa-large as a compact routing classifier. Adaptive-RAG's
+released classifier is trained as a T5 seq2seq model that generates `A` / `B` /
+`C`; here we fine-tune a direct 3-way classification head instead.
 
 ## Setup (Windows + RTX 50-series / Blackwell)
 
@@ -48,6 +50,77 @@ This first slice stands up the classifier piece only: download a RoBERTa-large c
 
 To change where weights are cached, copy `.env.example` to `.env` and set `HF_HOME`, or set the env var directly.
 
+## Classifier Training
+
+Once `data/labeled/classifier_train.jsonl` and
+`data/labeled/classifier_valid.jsonl` exist, fine-tune the RoBERTa router:
+
+```powershell
+python -m scripts.train_classifier `
+  --train-file data/labeled/classifier_train.jsonl `
+  --validation-file data/labeled/classifier_valid.jsonl `
+  --output-dir outputs/classifier/roberta-large `
+  --epochs 15 `
+  --batch-size 8 `
+  --eval-batch-size 32 `
+  --gradient-accumulation-steps 4 `
+  --learning-rate 3e-5 `
+  --max-length 384 `
+  --fp16
+```
+
+The trainer maps `oracle_label` to the same route IDs used by
+`src.config.LABEL_MAP`:
+
+- `no_retrieval` -> `0`
+- `single_step` -> `1`
+- `multi_step` -> `2`
+
+It saves the best validation checkpoint, `best_metrics.json`, `history.json`,
+and `label_map.json` under the output directory.
+
+To mirror Adaptive-RAG's `binary_silver/train.json` setup more closely, first
+build an augmented train file from Adaptive-RAG's binary-prior training rows.
+If the sibling repo is available at `../Adaptive-RAG`, extract its binary file:
+
+```powershell
+mkdir data/reference
+tar -xOzf ../Adaptive-RAG/data.tar.gz `
+  ./classifier/data/musique_hotpot_wiki2_nq_tqa_sqd/binary/total_data_train.json `
+  > data/reference/adaptive_binary_total_data_train.json
+```
+
+Then combine those binary rows with this repo's true silver rows:
+
+```powershell
+python -m scripts.build_binary_silver_classifier_data `
+  --adaptive-binary-json data/reference/adaptive_binary_total_data_train.json `
+  --silver-train-file data/labeled/classifier_train.jsonl `
+  --output-file data/labeled/classifier_train_binary_silver.jsonl
+```
+
+Then train with:
+
+```powershell
+python -m scripts.train_classifier `
+  --train-file data/labeled/classifier_train_binary_silver.jsonl `
+  --validation-file data/labeled/classifier_valid.jsonl `
+  --output-dir outputs/classifier/roberta-large-binary-silver `
+  --epochs 15 `
+  --batch-size 8 `
+  --eval-batch-size 32 `
+  --gradient-accumulation-steps 4 `
+  --learning-rate 3e-5 `
+  --max-length 384 `
+  --fp16
+```
+
+The binary+silver builder requires `data/processed/{dataset}/train.jsonl` for
+all six datasets only if `--adaptive-binary-json` is not supplied. The currently
+committed `data/train_500` split is not enough to add Adaptive-RAG-style
+binary-prior examples, because those rows are already the silver training
+questions.
+
 ## LLM (Ollama)
 
 The answering LLM is served by [Ollama](https://ollama.com/), reached at the `LLM_BASE_URL` you set in `.env` (see `.env.example`) — which may point at a remote host. Ollama is used (rather than LM Studio) because as of LM Studio 0.3.x the OpenAI-compat layer returns `null` for per-token logprobs — which the Step 5 confidence probe depends on.
@@ -74,9 +147,9 @@ The LLM client ([src/annotate_lib/llm_adapter.py](src/annotate_lib/llm_adapter.p
 ## Roadmap
 
 - [x] Local RoBERTa classifier loads + runs inference on GPU
-- [ ] Training data: synthesize A/B/C labels from SQuAD / HotpotQA / MuSiQue
-- [ ] Fine-tune the classifier
-- [ ] Retriever (BM25 + dense)
+- [x] Training data: synthesize A/B/C labels from SQuAD / HotpotQA / MuSiQue
+- [x] Fine-tune the classifier
+- [x] Retriever (BM25)
 - [x] LLM client (Ollama native `/api/chat`)
 - [ ] Confidence-gated routing
 - [ ] End-to-end eval harness
