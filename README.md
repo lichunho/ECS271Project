@@ -129,7 +129,7 @@ python -m scripts.train_t5_classifier `
   --gradient-accumulation-steps 4 `
   --learning-rate 3e-5 `
   --max-length 384 `
-  --fp16 `
+  --bf16 `
   --no-epoch-checkpoints
 ```
 

@@ -104,7 +104,9 @@ def parse_args() -> argparse.Namespace:
         default="accuracy",
         help="Validation metric used to choose the saved best model.",
     )
-    p.add_argument("--fp16", action="store_true", help="Use CUDA automatic mixed precision.")
+    precision = p.add_mutually_exclusive_group()
+    precision.add_argument("--fp16", action="store_true", help="Use CUDA float16 automatic mixed precision.")
+    precision.add_argument("--bf16", action="store_true", help="Use CUDA bfloat16 automatic mixed precision.")
     p.add_argument("--max-train-samples", type=int, default=None)
     p.add_argument("--max-eval-samples", type=int, default=None)
     p.add_argument("--no-epoch-checkpoints", action="store_true")
@@ -283,12 +285,13 @@ def main() -> None:
     set_seed(args.seed)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    log.info("device=%s model=%s output_dir=%s", device, args.model_name, args.output_dir)
+    precision = "bf16" if args.bf16 else "fp16" if args.fp16 else "fp32"
+    log.info("device=%s model=%s output_dir=%s precision=%s", device, args.model_name, args.output_dir, precision)
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_name, cache_dir=CACHE_DIR)
     model = AutoModelForSeq2SeqLM.from_pretrained(args.model_name, cache_dir=CACHE_DIR)
     model.to(device)
-    if args.fp16:
+    if args.fp16 or args.bf16:
         model.float()
 
     train_examples = load_examples(args.train_file, args.max_train_samples)
@@ -341,20 +344,40 @@ def main() -> None:
         progress = tqdm(train_loader, desc=f"epoch {epoch}/{args.epochs}")
         for step, batch in enumerate(progress, start=1):
             model_batch = batch_to_device(batch, device)
-            with torch.amp.autocast("cuda", enabled=args.fp16 and device.type == "cuda"):
+            autocast_enabled = (args.fp16 or args.bf16) and device.type == "cuda"
+            autocast_dtype = torch.bfloat16 if args.bf16 else torch.float16
+            with torch.amp.autocast("cuda", enabled=autocast_enabled, dtype=autocast_dtype):
                 loss = model(**model_batch).loss / args.gradient_accumulation_steps
 
-            scaler.scale(loss).backward()
+            if not torch.isfinite(loss.detach()):
+                raise FloatingPointError(
+                    f"Non-finite loss at epoch={epoch} step={step}. "
+                    "For T5 on A100, rerun with --bf16 instead of --fp16."
+                )
+
+            if args.fp16 and device.type == "cuda":
+                scaler.scale(loss).backward()
+            else:
+                loss.backward()
             running_loss += float(loss.item()) * args.gradient_accumulation_steps
 
             is_update_step = step % args.gradient_accumulation_steps == 0
             is_last_step = step == len(train_loader)
             if is_update_step or is_last_step:
-                scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-                scaler.step(optimizer)
-                scaler.update()
-                scheduler.step()
+                if args.fp16 and device.type == "cuda":
+                    scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                    scale_before = scaler.get_scale()
+                    scaler.step(optimizer)
+                    scaler.update()
+                    step_was_skipped = scaler.get_scale() < scale_before
+                else:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                    optimizer.step()
+                    step_was_skipped = False
+
+                if not step_was_skipped:
+                    scheduler.step()
                 optimizer.zero_grad(set_to_none=True)
 
             progress.set_postfix(loss=running_loss / step)
