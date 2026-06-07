@@ -19,7 +19,7 @@ from transformers import (
     get_linear_schedule_with_warmup,
 )
 
-from src.config import CACHE_DIR, LABEL_MAP, MODEL_NAME, NUM_LABELS
+from src.config import CACHE_DIR, LABEL_MAP, NUM_LABELS
 
 
 log = logging.getLogger(__name__)
@@ -63,11 +63,11 @@ class QuestionDataset(Dataset):
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Fine-tune RoBERTa to route questions to Adaptive-RAG strategies.")
-    p.add_argument("--train-file", type=Path, default=Path("data/labeled/classifier_train.jsonl"))
-    p.add_argument("--validation-file", type=Path, default=Path("data/labeled/classifier_valid.jsonl"))
-    p.add_argument("--output-dir", type=Path, default=Path("outputs/classifier/roberta-large"))
-    p.add_argument("--model-name", type=str, default=MODEL_NAME)
+    p = argparse.ArgumentParser(description="Fine-tune an encoder classifier to route questions to Adaptive-RAG strategies.")
+    p.add_argument("--train-file", type=Path, default=Path("data/labeled/classifier_train_binary_silver.jsonl"))
+    p.add_argument("--validation-file", type=Path, default=Path("data/labeled/classifier_valid_silver.jsonl"))
+    p.add_argument("--output-dir", type=Path, default=Path("outputs/classifier/deberta-v3-large-binary-silver"))
+    p.add_argument("--model-name", type=str, default="microsoft/deberta-v3-large")
     p.add_argument("--max-length", type=int, default=384)
     p.add_argument("--epochs", type=int, default=15)
     p.add_argument("--batch-size", type=int, default=8)
@@ -81,6 +81,17 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--fp16", action="store_true", help="Use CUDA automatic mixed precision.")
     p.add_argument("--max-train-samples", type=int, default=None)
     p.add_argument("--max-eval-samples", type=int, default=None)
+    p.add_argument(
+        "--resume-from-checkpoint",
+        type=Path,
+        default=None,
+        help="Resume from a checkpoint_epoch_N directory written by this script.",
+    )
+    p.add_argument(
+        "--no-epoch-checkpoints",
+        action="store_true",
+        help="Do not save checkpoint_epoch_N directories after each epoch.",
+    )
     return p.parse_args()
 
 
@@ -182,6 +193,62 @@ def evaluate(
     return metrics
 
 
+def checkpoint_epoch_from_path(path: Path) -> int:
+    try:
+        return int(path.name.rsplit("_", 1)[1])
+    except (IndexError, ValueError) as e:
+        raise ValueError(f"Checkpoint directory must be named checkpoint_epoch_N: {path}") from e
+
+
+def save_epoch_checkpoint(
+    *,
+    checkpoint_dir: Path,
+    model: AutoModelForSequenceClassification,
+    tokenizer: Any,
+    optimizer: torch.optim.Optimizer,
+    scheduler: Any,
+    scaler: torch.cuda.amp.GradScaler,
+    epoch: int,
+    best_accuracy: float,
+    history: list[dict[str, Any]],
+    args: argparse.Namespace,
+) -> None:
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    model.save_pretrained(checkpoint_dir)
+    tokenizer.save_pretrained(checkpoint_dir)
+    torch.save(
+        {
+            "epoch": epoch,
+            "best_accuracy": best_accuracy,
+            "history": history,
+            "optimizer": optimizer.state_dict(),
+            "scheduler": scheduler.state_dict(),
+            "scaler": scaler.state_dict(),
+            "args": {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()},
+        },
+        checkpoint_dir / "training_state.pt",
+    )
+
+
+def load_training_state(
+    checkpoint_dir: Path,
+    *,
+    optimizer: torch.optim.Optimizer,
+    scheduler: Any,
+    scaler: torch.cuda.amp.GradScaler,
+    device: torch.device,
+) -> tuple[int, float, list[dict[str, Any]]]:
+    state_path = checkpoint_dir / "training_state.pt"
+    if not state_path.exists():
+        raise FileNotFoundError(f"Missing training state: {state_path}")
+    state = torch.load(state_path, map_location=device)
+    optimizer.load_state_dict(state["optimizer"])
+    scheduler.load_state_dict(state["scheduler"])
+    if state.get("scaler"):
+        scaler.load_state_dict(state["scaler"])
+    return int(state["epoch"]) + 1, float(state.get("best_accuracy", -1.0)), list(state.get("history", []))
+
+
 def main() -> None:
     args = parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -190,17 +257,22 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(message)s",
         handlers=[
             logging.StreamHandler(),
-            logging.FileHandler(args.output_dir / "train.log", mode="w", encoding="utf8"),
+            logging.FileHandler(
+                args.output_dir / "train.log",
+                mode="a" if args.resume_from_checkpoint else "w",
+                encoding="utf8",
+            ),
         ],
     )
     set_seed(args.seed)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    log.info("device=%s model=%s", device, args.model_name)
+    model_source = args.resume_from_checkpoint or args.model_name
+    log.info("device=%s model_source=%s output_dir=%s", device, model_source, args.output_dir)
 
-    tokenizer = AutoTokenizer.from_pretrained(args.model_name, cache_dir=CACHE_DIR)
+    tokenizer = AutoTokenizer.from_pretrained(str(model_source), cache_dir=CACHE_DIR)
     model = AutoModelForSequenceClassification.from_pretrained(
-        args.model_name,
+        str(model_source),
         num_labels=NUM_LABELS,
         id2label=LABEL_MAP,
         label2id=LABEL_TO_ID,
@@ -241,8 +313,28 @@ def main() -> None:
 
     best_accuracy = -1.0
     history: list[dict[str, Any]] = []
+    start_epoch = 1
+    if args.resume_from_checkpoint is not None:
+        start_epoch, best_accuracy, history = load_training_state(
+            args.resume_from_checkpoint,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            scaler=scaler,
+            device=device,
+        )
+        log.info(
+            "resumed from %s; next_epoch=%d best_accuracy=%.4f prior_history=%d",
+            args.resume_from_checkpoint,
+            start_epoch,
+            best_accuracy,
+            len(history),
+        )
 
-    for epoch in range(1, args.epochs + 1):
+    if start_epoch > args.epochs:
+        log.info("checkpoint is already past requested epochs (%d > %d); nothing to train", start_epoch, args.epochs)
+        return
+
+    for epoch in range(start_epoch, args.epochs + 1):
         model.train()
         optimizer.zero_grad(set_to_none=True)
         running_loss = 0.0
@@ -286,6 +378,22 @@ def main() -> None:
 
         with open(args.output_dir / "history.json", "w", encoding="utf8") as fh:
             json.dump(history, fh, indent=2)
+
+        if not args.no_epoch_checkpoints:
+            checkpoint_dir = args.output_dir / f"checkpoint_epoch_{epoch}"
+            save_epoch_checkpoint(
+                checkpoint_dir=checkpoint_dir,
+                model=model,
+                tokenizer=tokenizer,
+                optimizer=optimizer,
+                scheduler=scheduler,
+                scaler=scaler,
+                epoch=epoch,
+                best_accuracy=best_accuracy,
+                history=history,
+                args=args,
+            )
+            log.info("saved checkpoint to %s", checkpoint_dir)
 
     with open(args.output_dir / "label_map.json", "w", encoding="utf8") as fh:
         json.dump({"id2label": LABEL_MAP, "label2id": LABEL_TO_ID}, fh, indent=2)

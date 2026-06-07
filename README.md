@@ -6,9 +6,10 @@ Adaptive RAG pipeline (in the style of Jeong et al. 2024, *"Adaptive-RAG"*). A s
 - **B** — single-step retrieval (one-hop)
 - **C** — multi-step retrieval (multi-hop)
 
-This project uses RoBERTa-large as a compact routing classifier. Adaptive-RAG's
-released classifier is trained as a T5 seq2seq model that generates `A` / `B` /
-`C`; here we fine-tune a direct 3-way classification head instead.
+This project uses encoder-only classifiers such as DeBERTa-v3-large or
+RoBERTa-large as compact routing models. Adaptive-RAG's released classifier is
+trained as a T5 seq2seq model that generates `A` / `B` / `C`; here we
+fine-tune a direct 3-way classification head instead.
 
 ## Setup (Windows + RTX 50-series / Blackwell)
 
@@ -38,7 +39,7 @@ released classifier is trained as a T5 seq2seq model that generates `A` / `B` /
    ```
    Expected: `True NVIDIA GeForce RTX 5070 Ti` (or whatever GPU is present).
 
-5. Prefetch model weights (~1.4 GB for `roberta-large`):
+5. Prefetch model weights:
    ```powershell
    python -m scripts.download_model
    ```
@@ -53,13 +54,15 @@ To change where weights are cached, copy `.env.example` to `.env` and set `HF_HO
 ## Classifier Training
 
 Once `data/labeled/classifier_train.jsonl` and
-`data/labeled/classifier_valid.jsonl` exist, fine-tune the RoBERTa router:
+`data/labeled/classifier_valid.jsonl` exist, fine-tune a simple silver-only
+router:
 
 ```powershell
 python -m scripts.train_classifier `
   --train-file data/labeled/classifier_train.jsonl `
   --validation-file data/labeled/classifier_valid.jsonl `
-  --output-dir outputs/classifier/roberta-large `
+  --model-name microsoft/deberta-v3-large `
+  --output-dir outputs/classifier/deberta-v3-large-silver `
   --epochs 15 `
   --batch-size 8 `
   --eval-batch-size 32 `
@@ -99,19 +102,27 @@ python -m scripts.build_binary_silver_classifier_data `
   --output-file data/labeled/classifier_train_binary_silver.jsonl
 ```
 
-Then train with:
+Then train DeBERTa-v3-large with:
 
 ```powershell
 python -m scripts.train_classifier `
   --train-file data/labeled/classifier_train_binary_silver.jsonl `
-  --validation-file data/labeled/classifier_valid.jsonl `
-  --output-dir outputs/classifier/roberta-large-binary-silver `
-  --epochs 15 `
-  --batch-size 8 `
-  --eval-batch-size 32 `
-  --gradient-accumulation-steps 4 `
-  --learning-rate 3e-5 `
-  --max-length 384 `
+  --validation-file data/labeled/classifier_valid_silver.jsonl `
+  --model-name microsoft/deberta-v3-large `
+  --output-dir outputs/classifier/deberta-v3-large-binary-silver `
+  --fp16
+```
+
+The trainer saves the best model at `--output-dir` and writes full resumable
+epoch checkpoints under `--output-dir/checkpoint_epoch_N`. To resume after an
+interruption:
+
+```powershell
+python -m scripts.train_classifier `
+  --train-file data/labeled/classifier_train_binary_silver.jsonl `
+  --validation-file data/labeled/classifier_valid_silver.jsonl `
+  --output-dir outputs/classifier/deberta-v3-large-binary-silver `
+  --resume-from-checkpoint outputs/classifier/deberta-v3-large-binary-silver/checkpoint_epoch_8 `
   --fp16
 ```
 
