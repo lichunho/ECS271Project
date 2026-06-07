@@ -279,6 +279,12 @@ def main() -> None:
         cache_dir=CACHE_DIR,
     )
     model.to(device)
+    if args.fp16:
+        # AMP expects FP32 trainable parameters and casts selected ops to FP16
+        # during the forward pass. Some environments/model files can leave
+        # parameters in half precision, which makes GradScaler fail while
+        # unscaling gradients.
+        model.float()
 
     train_examples = load_examples(args.train_file, args.max_train_samples)
     eval_examples = load_examples(args.validation_file, args.max_eval_samples)
@@ -296,7 +302,7 @@ def main() -> None:
     total_steps = args.epochs * update_steps_per_epoch
     warmup_steps = int(total_steps * args.warmup_ratio)
     scheduler = get_linear_schedule_with_warmup(optimizer, warmup_steps, total_steps)
-    scaler = torch.cuda.amp.GradScaler(enabled=args.fp16 and device.type == "cuda")
+    scaler = torch.amp.GradScaler("cuda", enabled=args.fp16 and device.type == "cuda")
     loss_fn = None
     if args.class_weights:
         loss_fn = torch.nn.CrossEntropyLoss(weight=class_weight_tensor(train_examples, device))
@@ -341,7 +347,7 @@ def main() -> None:
         progress = tqdm(train_loader, desc=f"epoch {epoch}/{args.epochs}")
         for step, batch in enumerate(progress, start=1):
             model_batch = batch_to_device(batch, device)
-            with torch.cuda.amp.autocast(enabled=args.fp16 and device.type == "cuda"):
+            with torch.amp.autocast("cuda", enabled=args.fp16 and device.type == "cuda"):
                 outputs = model(**model_batch)
                 loss = outputs.loss
                 if loss_fn is not None:
