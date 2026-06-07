@@ -77,7 +77,23 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--warmup-ratio", type=float, default=0.06)
     p.add_argument("--gradient-accumulation-steps", type=int, default=4)
     p.add_argument("--seed", type=int, default=13370)
-    p.add_argument("--class-weights", action="store_true", help="Weight loss inversely to class frequency.")
+    p.add_argument(
+        "--class-weighting",
+        choices=("none", "inverse_freq"),
+        default="none",
+        help="Class weighting strategy for the training loss.",
+    )
+    p.add_argument(
+        "--class-weights",
+        action="store_true",
+        help="Deprecated alias for --class-weighting inverse_freq.",
+    )
+    p.add_argument(
+        "--selection-metric",
+        choices=("accuracy", "balanced_accuracy", "macro_f1"),
+        default="accuracy",
+        help="Validation metric used to choose the saved best model.",
+    )
     p.add_argument("--fp16", action="store_true", help="Use CUDA automatic mixed precision.")
     p.add_argument("--max-train-samples", type=int, default=None)
     p.add_argument("--max-eval-samples", type=int, default=None)
@@ -132,6 +148,14 @@ def class_weight_tensor(examples: list[Example], device: torch.device) -> torch.
     return torch.tensor(weights, dtype=torch.float, device=device)
 
 
+def resolve_class_weighting(args: argparse.Namespace) -> str:
+    if args.class_weights and args.class_weighting != "none":
+        raise ValueError("Use either --class-weights or --class-weighting, not both.")
+    if args.class_weights:
+        return "inverse_freq"
+    return args.class_weighting
+
+
 def batch_to_device(batch: dict[str, Any], device: torch.device) -> dict[str, torch.Tensor]:
     return {
         "input_ids": batch["input_ids"].to(device),
@@ -183,6 +207,17 @@ def evaluate(
         }
         for label, values in per_label.items()
     }
+    recalls = [values["accuracy"] for values in metrics["per_label"].values()]
+    metrics["balanced_accuracy"] = sum(recalls) / len(recalls) if recalls else 0.0
+    f1s = []
+    for label, values in metrics["per_label"].items():
+        precision = values["correct"] / values["predicted"] if values["predicted"] else 0.0
+        recall = values["accuracy"]
+        f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+        values["precision"] = precision
+        values["f1"] = f1
+        f1s.append(f1)
+    metrics["macro_f1"] = sum(f1s) / len(f1s) if f1s else 0.0
     metrics["per_dataset"] = {
         dataset: {
             **values,
@@ -209,7 +244,7 @@ def save_epoch_checkpoint(
     scheduler: Any,
     scaler: torch.cuda.amp.GradScaler,
     epoch: int,
-    best_accuracy: float,
+    best_score: float,
     history: list[dict[str, Any]],
     args: argparse.Namespace,
 ) -> None:
@@ -219,7 +254,7 @@ def save_epoch_checkpoint(
     torch.save(
         {
             "epoch": epoch,
-            "best_accuracy": best_accuracy,
+            "best_score": best_score,
             "history": history,
             "optimizer": optimizer.state_dict(),
             "scheduler": scheduler.state_dict(),
@@ -246,11 +281,13 @@ def load_training_state(
     scheduler.load_state_dict(state["scheduler"])
     if state.get("scaler"):
         scaler.load_state_dict(state["scaler"])
-    return int(state["epoch"]) + 1, float(state.get("best_accuracy", -1.0)), list(state.get("history", []))
+    best_score = state.get("best_score", state.get("best_accuracy", -1.0))
+    return int(state["epoch"]) + 1, float(best_score), list(state.get("history", []))
 
 
 def main() -> None:
     args = parse_args()
+    class_weighting = resolve_class_weighting(args)
     args.output_dir.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
         level=logging.INFO,
@@ -304,24 +341,26 @@ def main() -> None:
     scheduler = get_linear_schedule_with_warmup(optimizer, warmup_steps, total_steps)
     scaler = torch.amp.GradScaler("cuda", enabled=args.fp16 and device.type == "cuda")
     loss_fn = None
-    if args.class_weights:
+    if class_weighting == "inverse_freq":
         loss_fn = torch.nn.CrossEntropyLoss(weight=class_weight_tensor(train_examples, device))
     effective_batch_size = args.batch_size * args.gradient_accumulation_steps
     log.info(
-        "epochs=%d lr=%g batch_size=%d grad_accum=%d effective_batch_size=%d max_length=%d",
+        "epochs=%d lr=%g batch_size=%d grad_accum=%d effective_batch_size=%d max_length=%d selection_metric=%s class_weighting=%s",
         args.epochs,
         args.learning_rate,
         args.batch_size,
         args.gradient_accumulation_steps,
         effective_batch_size,
         args.max_length,
+        args.selection_metric,
+        class_weighting,
     )
 
-    best_accuracy = -1.0
+    best_score = -1.0
     history: list[dict[str, Any]] = []
     start_epoch = 1
     if args.resume_from_checkpoint is not None:
-        start_epoch, best_accuracy, history = load_training_state(
+        start_epoch, best_score, history = load_training_state(
             args.resume_from_checkpoint,
             optimizer=optimizer,
             scheduler=scheduler,
@@ -329,10 +368,11 @@ def main() -> None:
             device=device,
         )
         log.info(
-            "resumed from %s; next_epoch=%d best_accuracy=%.4f prior_history=%d",
+            "resumed from %s; next_epoch=%d best_%s=%.4f prior_history=%d",
             args.resume_from_checkpoint,
             start_epoch,
-            best_accuracy,
+            args.selection_metric,
+            best_score,
             len(history),
         )
 
@@ -373,10 +413,18 @@ def main() -> None:
         metrics["epoch"] = epoch
         metrics["train_loss"] = running_loss / max(1, len(train_loader))
         history.append(metrics)
-        log.info("epoch=%d valid_accuracy=%.4f train_loss=%.4f", epoch, metrics["accuracy"], metrics["train_loss"])
+        selection_score = float(metrics[args.selection_metric])
+        log.info(
+            "epoch=%d valid_accuracy=%.4f balanced_accuracy=%.4f macro_f1=%.4f train_loss=%.4f",
+            epoch,
+            metrics["accuracy"],
+            metrics["balanced_accuracy"],
+            metrics["macro_f1"],
+            metrics["train_loss"],
+        )
 
-        if metrics["accuracy"] > best_accuracy:
-            best_accuracy = metrics["accuracy"]
+        if selection_score > best_score:
+            best_score = selection_score
             model.save_pretrained(args.output_dir)
             tokenizer.save_pretrained(args.output_dir)
             with open(args.output_dir / "best_metrics.json", "w", encoding="utf8") as fh:
@@ -395,7 +443,7 @@ def main() -> None:
                 scheduler=scheduler,
                 scaler=scaler,
                 epoch=epoch,
-                best_accuracy=best_accuracy,
+                best_score=best_score,
                 history=history,
                 args=args,
             )
@@ -403,7 +451,7 @@ def main() -> None:
 
     with open(args.output_dir / "label_map.json", "w", encoding="utf8") as fh:
         json.dump({"id2label": LABEL_MAP, "label2id": LABEL_TO_ID}, fh, indent=2)
-    log.info("best valid accuracy=%.4f saved to %s", best_accuracy, args.output_dir)
+    log.info("best valid %s=%.4f saved to %s", args.selection_metric, best_score, args.output_dir)
 
 
 if __name__ == "__main__":
