@@ -8,8 +8,9 @@ Adaptive RAG pipeline (in the style of Jeong et al. 2024, *"Adaptive-RAG"*). A s
 
 This project uses encoder-only classifiers such as DeBERTa-v3-large or
 RoBERTa-large as compact routing models. Adaptive-RAG's released classifier is
-trained as a T5 seq2seq model that generates `A` / `B` / `C`; here we
-fine-tune a direct 3-way classification head instead.
+trained as a T5 seq2seq model that generates `A` / `B` / `C`; this repo
+supports both the compact encoder classifier and a comparable T5 seq2seq
+classifier.
 
 ## Setup (Windows + RTX 50-series / Blackwell)
 
@@ -112,6 +113,29 @@ python -m scripts.train_classifier `
   --output-dir outputs/classifier/deberta-v3-large-binary-silver `
   --fp16
 ```
+
+To run an Adaptive-RAG-style T5 classifier on the same binary+silver/silver
+split, use:
+
+```powershell
+python -m scripts.train_t5_classifier `
+  --train-file data/labeled/classifier_train_binary_silver.jsonl `
+  --validation-file data/labeled/classifier_valid_silver.jsonl `
+  --model-name t5-large `
+  --output-dir outputs/classifier/t5-large-binary-silver `
+  --epochs 15 `
+  --batch-size 8 `
+  --eval-batch-size 32 `
+  --gradient-accumulation-steps 4 `
+  --learning-rate 3e-5 `
+  --max-length 384 `
+  --fp16 `
+  --no-epoch-checkpoints
+```
+
+This script trains T5 to emit `A`, `B`, or `C` and evaluates by comparing the
+first generated-token scores for those three options, matching the original
+Adaptive-RAG classifier setup more closely than an encoder classification head.
 
 The trainer saves the best model at `--output-dir` and writes full resumable
 epoch checkpoints under `--output-dir/checkpoint_epoch_N`. To resume after an
