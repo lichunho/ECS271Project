@@ -4,9 +4,14 @@ from pathlib import Path
 import torch
 from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+load_dotenv(REPO_ROOT / ".env")
 
 MODEL_NAME = "FacebookAI/roberta-large"
+
+# Default root for the offline eval harness (data/labeled/{eval,train}/*.jsonl).
+LABELED_DIR = REPO_ROOT / "data" / "labeled"
 
 NUM_LABELS = 3
 
