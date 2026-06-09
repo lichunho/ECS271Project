@@ -137,6 +137,25 @@ This script trains T5 to emit `A`, `B`, or `C` and evaluates by comparing the
 first generated-token scores for those three options, matching the original
 Adaptive-RAG classifier setup more closely than an encoder classification head.
 
+To precompute initial router choices for the 500-example test/eval split, run
+one route-prediction job per saved classifier:
+
+```powershell
+python -m scripts.predict_routes `
+  --data-dir data/eval_500 `
+  --model-kind encoder `
+  --model-path outputs/classifier/deberta-v3-base-binary-silver `
+  --classifier-name deberta-v3-base-binary-silver `
+  --output-dir outputs/routes `
+  --batch-size 32 `
+  --max-length 384 `
+  --include-answers
+```
+
+This writes `outputs/routes/{classifier-name}.routes.jsonl` and
+`outputs/routes/{classifier-name}.summary.json`. Point `--output-dir` at a
+Google Drive path in Colab to persist the files.
+
 The trainer saves the best model at `--output-dir` and writes full resumable
 epoch checkpoints under `--output-dir/checkpoint_epoch_N`. To resume after an
 interruption:
