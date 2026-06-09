@@ -34,9 +34,15 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--input-routes", type=Path, required=True)
     p.add_argument("--output-file", type=Path, required=True)
     p.add_argument("--summary-file", type=Path, default=None)
-    p.add_argument("--model", default="gemma3:27b", help="Ollama model name.")
+    p.add_argument("--model", default="google/gemma-4-26B-A4B-it", help="Model name exposed by the OpenAI-compatible server.")
     p.add_argument("--base-url", default="http://localhost:11434/v1")
     p.add_argument("--api-key", default="ollama")
+    p.add_argument(
+        "--api-mode",
+        choices=("completions", "chat"),
+        default="completions",
+        help="Use raw completions for Adaptive-RAG completion-style prompts, or chat completions for chat servers.",
+    )
     p.add_argument("--threshold", type=float, default=0.5, help="Minimum first-sentence token probability to downgrade.")
     p.add_argument("--max-tokens", type=int, default=48)
     p.add_argument("--temperature", type=float, default=0.0)
@@ -143,7 +149,7 @@ def token_probability(token: dict[str, Any]) -> float | None:
         return None
 
 
-def extract_tokens_with_logprobs(choice: Any) -> list[dict[str, Any]]:
+def extract_chat_tokens_with_logprobs(choice: Any) -> list[dict[str, Any]]:
     logprobs = getattr(choice, "logprobs", None)
     if logprobs is None:
         return []
@@ -158,30 +164,56 @@ def extract_tokens_with_logprobs(choice: Any) -> list[dict[str, Any]]:
     return tokens
 
 
+def extract_completion_tokens_with_logprobs(choice: Any) -> list[dict[str, Any]]:
+    logprobs = getattr(choice, "logprobs", None)
+    if logprobs is None:
+        return []
+    tokens = getattr(logprobs, "tokens", None) or []
+    token_logprobs = getattr(logprobs, "token_logprobs", None) or []
+    return [
+        {"token": token, "logprob": logprob}
+        for token, logprob in zip(tokens, token_logprobs)
+    ]
+
+
 def probe_one(client: OpenAI, args: argparse.Namespace, row: dict[str, Any]) -> dict[str, Any]:
     prompt = build_probe_prompt(row)
     start = time.perf_counter()
-    response = client.chat.completions.create(
-        model=args.model,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=args.temperature,
-        max_tokens=args.max_tokens,
-        logprobs=True,
-        top_logprobs=0,
-        timeout=args.timeout,
-    )
+    if args.api_mode == "completions":
+        response = client.completions.create(
+            model=args.model,
+            prompt=prompt,
+            temperature=args.temperature,
+            max_tokens=args.max_tokens,
+            logprobs=0,
+            timeout=args.timeout,
+        )
+    else:
+        response = client.chat.completions.create(
+            model=args.model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=args.temperature,
+            max_tokens=args.max_tokens,
+            logprobs=True,
+            top_logprobs=0,
+            timeout=args.timeout,
+        )
     latency_ms = (time.perf_counter() - start) * 1000
     choice = response.choices[0]
-    text = choice.message.content or ""
-    all_tokens = extract_tokens_with_logprobs(choice)
+    if args.api_mode == "completions":
+        text = choice.text or ""
+        all_tokens = extract_completion_tokens_with_logprobs(choice)
+    else:
+        text = choice.message.content or ""
+        all_tokens = extract_chat_tokens_with_logprobs(choice)
     sent_tokens = first_sentence_tokens(all_tokens)
     probs = [p for p in (token_probability(t) for t in sent_tokens) if p is not None]
 
     if not sent_tokens or len(probs) != len(sent_tokens):
         if args.strict_logprobs:
             raise RuntimeError(
-                "Ollama response did not include usable token logprobs. "
-                "Upgrade/check Ollama OpenAI compatibility, or use a backend that supports logprobs."
+                "The model server response did not include usable token logprobs. "
+                "Use a backend/API mode that supports logprobs, such as vLLM /v1/completions."
             )
         confident = False
         min_prob = None
@@ -196,6 +228,7 @@ def probe_one(client: OpenAI, args: argparse.Namespace, row: dict[str, Any]) -> 
     out.update(
         {
             "probe_model": args.model,
+            "probe_api_mode": args.api_mode,
             "probe_threshold": args.threshold,
             "probe_prompt": prompt,
             "probe_text": text,
@@ -217,6 +250,7 @@ def passthrough_row(row: dict[str, Any]) -> dict[str, Any]:
     out.update(
         {
             "probe_model": None,
+            "probe_api_mode": None,
             "probe_threshold": None,
             "probe_text": None,
             "probe_first_sentence_tokens": [],
@@ -250,6 +284,7 @@ def write_summary(path: Path, rows: list[dict[str, Any]], args: argparse.Namespa
         "input_routes": str(args.input_routes),
         "output_file": str(args.output_file),
         "probe_model": args.model,
+        "probe_api_mode": args.api_mode,
         "threshold": args.threshold,
         "num_rows": len(rows),
         "num_probed": probed,
@@ -271,7 +306,7 @@ def main() -> None:
     args = parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     summary_file = args.summary_file or args.output_file.with_suffix(".summary.json")
-    ollama_proc = ensure_ollama(args)
+    ollama_proc = ensure_ollama(args) if (args.start_ollama or args.pull_model) else None
     client = OpenAI(base_url=args.base_url, api_key=args.api_key)
 
     rows = load_route_rows(args.input_routes, args.limit)

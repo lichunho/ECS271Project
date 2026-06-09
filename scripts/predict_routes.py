@@ -86,6 +86,7 @@ def load_rows(data_dir: Path, datasets: list[str] | None, max_samples: int | Non
                 if not line.strip():
                     continue
                 row = json.loads(line)
+                row.setdefault("dataset", path.stem)
                 row["_source_file"] = str(path)
                 rows.append(row)
                 if max_samples is not None and len(rows) >= max_samples:
